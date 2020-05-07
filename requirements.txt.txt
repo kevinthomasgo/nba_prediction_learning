@@ -1,0 +1,2 @@
+lightgbm==2.3.0
+progressbar2==3.37.1
