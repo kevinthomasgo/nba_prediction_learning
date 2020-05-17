@@ -39,37 +39,65 @@ import lxml
 # Viz
 TM_pal_categorical_3 = ['#ef4631', '#10b9ce', '#ff9138']
 
-
-
-def time_splitter(df_features_transformed, cutoff_date_train, cutoff_date_test, cutoff_date_valid):
+def quick_checker(x):
     """
-    Split data into train, test, and validation sets.
+    Generates some summary stats for a column.
+    
+    """
+    percent_na_x = round(sum(x.isna())/len(x)*100,0)
+    min_x = x.min()
+    max_x = x.max()
+    val_counts_x = x.value_counts().iloc[0:5].to_dict()
+    return(
+        {
+            'percent_na': percent_na_x,
+            'min_x': min_x,
+            'max_x': max_x,
+            'val_counts_x': val_counts_x
+        }
+    )
+
+def quick_checker_all(df_raw):
+    """
+    Reuns quick_checker() on all columns of the given df.
+    
+    """
+    results = df_raw.apply(lambda x: quick_checker(x), axis=0)
+    results_df = pd.DataFrame([i for i in results.values])
+    results_df.insert(0, 'column', results.index)
+    return(results_df)
+
+
+def time_splitter(df_features_transformed, cutoff_date_train, cutoff_date_valid, cutoff_date_test):
+    """
+    Split data into train, validation, and test sets.
     
     Inputs:
     df_features_transformed: (pandas df) Dataframe that includes (transformed) features.
     features: (list) List of columns to be considered as features.
     index_list: (list) List of columns to be considered as indices.
     cutoff_date_train: (string) First date of train set.
-    cutoff_date_test: (string) Last date of train set, first date of test set.
     cutoff_date_valid: (string) Last date of test set, first date of validation set.
+    cutoff_date_test: (string) Last date of train set, first date of test set.
+    
     
     """
     
-    train = df_features_transformed[(df_features_transformed['year_month_day']>=cutoff_date_train) & (df_features_transformed['year_month_day']<cutoff_date_test)]
-    test = df_features_transformed[(df_features_transformed['year_month_day'] >= cutoff_date_test) & (df_features_transformed['year_month_day']<cutoff_date_valid)]
-    valid = df_features_transformed[df_features_transformed['year_month_day']>=cutoff_date_valid]
+    train = df_features_transformed[(df_features_transformed['year_month_day']>=cutoff_date_train) & (df_features_transformed['year_month_day']<cutoff_date_valid)]
+    valid = df_features_transformed[(df_features_transformed['year_month_day'] >= cutoff_date_valid) & (df_features_transformed['year_month_day']<cutoff_date_test)]
+    test = df_features_transformed[df_features_transformed['year_month_day']>=cutoff_date_test]
     
-    return(train, test, valid)
+    return(train, valid, test)
 
 
 
-def feature_transformer(df_features, features, index_list, scaler=None):
+def feature_transformer(df_features, features_list, index_list, scaler=None):
     """
     Transforms features (e.g., scaling by mean-centering and standardization).
     
     Inputs:
     df_features: (pandas df) Dataframe that includes columns to be used as features.
-    features: (list) List of columns to be considered as features.
+    features_list: (list) List of columns to be considered as features.
     index_list: (list) List of columns to be considered as index. Useful for filtering later.
     scaler: (scaler) Fitted sklearn scaler for scaling features. If none is provided, a new scaler is fit. 
     """
@@ -81,18 +109,18 @@ def feature_transformer(df_features, features, index_list, scaler=None):
     if scaler is None:
 #         print("No scaler provided. Fitting scaler...")
         scaler = StandardScaler()
-        scaler.fit(df_features[features])
-        transformed_features = pd.DataFrame(scaler.transform(df_features[features]))
-        transformed_features.columns = features
+        scaler.fit(df_features[features_list])
+        transformed_features = pd.DataFrame(scaler.transform(df_features[features_list]))
+        transformed_features.columns = features_list
         transformed_features.index = df_features.index
-        df_features[features] = transformed_features
+        df_features[features_list] = transformed_features
     # If scaler is provided, use it
     else:
 #         print("Scaler provided. Using scaler.")
-        transformed_features = pd.DataFrame(scaler.transform(df_features[features]))
-        transformed_features.columns = features
+        transformed_features = pd.DataFrame(scaler.transform(df_features[features_list]))
+        transformed_features.columns = features_list
         transformed_features.index = df_features.index
-        df_features[features] = transformed_features
+        df_features[features_list] = transformed_features
         
     return(df_features, scaler)
 
@@ -224,18 +252,18 @@ def safe_divide(x,y):
     
     
 
-def plot_probability(target_idx, predictions_df_valid, size_multiplier=10):
+def plot_probability(predictions_df_test, size_multiplier=10):
     """
     Plots probability of each probability score bin actually happening.
     
     """
     # Make bins for prediction assessment
-    predictions_df_valid['bin'] = pd.cut(predictions_df_valid['pred_proba'],np.arange(0,1.1,0.05), labels=False)
-    predictions_df_valid['interval'] = predictions_df_valid['bin']/20
+    predictions_df_test['bin'] = pd.cut(predictions_df_test['pred_proba'],np.arange(0,1.1,0.05), labels=False)
+    predictions_df_test['interval'] = predictions_df_test['bin']/20
     
     # Get combos
-    intervals = list(np.sort(predictions_df_valid['interval'].unique()))
-    seasons = list(np.sort(predictions_df_valid['season'].unique()))
+    intervals = list(np.sort(predictions_df_test['interval'].unique()))
+    seasons = list(np.sort(predictions_df_test['season'].unique()))
     combos_df = pd.DataFrame({'season':seasons, 'key':1}).merge(pd.DataFrame({'interval':intervals, 'key':1}), on='key').drop(columns='key')
 
     # Make 
@@ -245,7 +273,7 @@ def plot_probability(target_idx, predictions_df_valid, size_multiplier=10):
     for_plotting = pd.DataFrame()
     for i in range(len(combos_df)): 
         season_i = combos_df.loc[i,'season']
-        bin_i = predictions_df_valid[(predictions_df_valid['interval']==combos_df.loc[i,'interval']) & (predictions_df_valid['season']==season_i)]
+        bin_i = predictions_df_test[(predictions_df_test['interval']==combos_df.loc[i,'interval']) & (predictions_df_test['season']==season_i)]
         actual_prob = safe_divide(len(bin_i[bin_i['home_pts']-bin_i['away_pts']>0]),len(bin_i))
         count_i = len(bin_i)*size_multiplier # Scale n_games to increase size of points later
         for_plotting = for_plotting.append(pd.DataFrame({
